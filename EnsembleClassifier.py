@@ -8,38 +8,6 @@ import numpy as np
 import tqdm
 
 
-ensemble = classifier_ensemble(
-        **{'RF':teste.model[0],
-         'CAT':teste.model[1],
-         'teste':1
-            }
-        )
-
-
-train_dataset = Pool(data=cat_X,
-                     label=cat_y,
-                     cat_features= list(range(cat_X.shape[1])))
-
-fitargs = {
-        'RF':{'X':rf_X,
-              'y':rf_y,
-                },
-                
-        'CAT':{'X':train_dataset,
-                }
-        }
-
-ensemble.fit(**fitargs)
-
-predargs = {
-        'RF':{'X':rf_X_val},
-        'CAT':{'data':cat_X_val}
-        }
-
-preds_ = ensemble.predict(method = 'max',**predargs)
-
-print(classification_report(preds_['CAT'],rf_y_val))
-
 class classifier_ensemble():
     
     def __init__(self, **models):
@@ -68,10 +36,13 @@ class classifier_ensemble():
         for model in tqdm.tqdm(self.models.keys()):
             self.models[model].fit(**fitargs[model])
         
-        self.cat_map = {name:index for index,name in enumerate(self.models[model].classes_)}
-        self.inv_cat_map = {index:name for index,name in enumerate(self.models[model].classes_)}
-        
         return self.models
+    
+    def cat_mapper(self):
+        self.cat_map = {name:index for index,name in enumerate(self.models[list(self.models)[0]].classes_)}
+        self.inv_cat_map = {index:name for index,name in enumerate(self.models[list(self.models)[0]].classes_)}
+        self.classes_ = list(cat_map)
+        return
     
     def predict(
             self,
@@ -118,10 +89,26 @@ class classifier_ensemble():
         
         proba_preds = self.predict_proba(**probapredargs)    
         
+        proba_preds_ensemble = self.aggregate_preds(
+                proba_preds,
+                method = method,
+                weights=weights,
+                custom_method = custom_method
+                )
+        
+        return proba_preds_ensemble
+    
+    def aggregate_preds(
+            self,
+            proba_preds,
+            method = 'max',
+            weights = None,
+            custom_method = None):
+        
         if method == 'custom':
             proba_preds_ensemble = custom_method(proba_preds)
         if method == 'mean':
-            proba_preds_ensemble = sum(weights[model]*proba_preds_ensemble[model] for model in self.models.keys())/sum(weights[model] for model in self.models.keys())
+            proba_preds_ensemble = sum(weights[model]*proba_preds[model] for model in self.models.keys())/sum(weights[model] for model in self.models.keys())
         if method == 'max':
             model_preds_max = np.concatenate(
                     [proba_preds[model].max(axis = 1).reshape(-1,1) for model in self.models.keys()],
@@ -144,21 +131,33 @@ class classifier_ensemble():
     
         return proba_preds_ensemble
     
+    
     def predict_ensemble(
             self,
             method = 'max',
             weights = {},
             custom_method = None,
+            proba_preds_ensemble = None,
             **probapredargs
             ):
         
-        proba_preds_ensemble = self.predict_proba_ensemble(
-                method = method,
-                weights = weights,
-                custom_method = custom_method,
-                **probapredargs
-                )
+        self.cat_mapper()
+        
+        if not (type(proba_preds_ensemble) == type(None)):
+            
+            proba_preds_ensemble = proba_preds_ensemble
+            
+        else:
+            
+            proba_preds_ensemble = self.predict_proba_ensemble(
+                    method = method,
+                    weights = weights,
+                    custom_method = custom_method,
+                    **probapredargs
+                    )
+        
         preds_ensemble = np.argmax(proba_preds_ensemble, axis = 1).flatten()
         preds_ensemble = np.array([self.inv_cat_map[pred] for pred in preds_ensemble])
+        
         return preds_ensemble
         
